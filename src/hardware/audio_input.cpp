@@ -90,27 +90,28 @@ bool AudioInput::begin() {
                       (long)dynamicRange);
     }
 
+    // Ensure I2S RX is active and running for local wake-word & voice capture
+    i2s_zero_dma_buffer(i2sPort);
+    i2s_start(i2sPort);
+
     return true;
 }
 
 void AudioInput::startRecording() {
     if (!isInitialized) return;
     i2s_zero_dma_buffer(i2sPort);
-    i2s_start(i2sPort);
     capturing = true;
-    Serial.println("[AudioInput] Started recording.");
+    Serial.println("[AudioInput] Voice capture session started.");
 }
 
 void AudioInput::stopRecording() {
     if (!isInitialized) return;
     capturing = false;
-    i2s_stop(i2sPort);
-    i2s_zero_dma_buffer(i2sPort);
-    Serial.println("[AudioInput] Stopped recording.");
+    Serial.println("[AudioInput] Voice capture session stopped.");
 }
 
 size_t AudioInput::readPcmChunk(int16_t* outputBuffer, size_t maxSamples) {
-    if (!isInitialized || !capturing || !outputBuffer) return 0;
+    if (!isInitialized || !outputBuffer) return 0;
 
     size_t bytesToRead = maxSamples * sizeof(int32_t);
     size_t bytesRead = 0;

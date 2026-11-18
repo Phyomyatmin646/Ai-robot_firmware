@@ -17,7 +17,7 @@ bool AudioOutput::begin() {
         .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
         .dma_buf_count = AUDIO_DMA_BUF_COUNT,
         .dma_buf_len = AUDIO_DMA_BUF_LEN,
-        .use_apll = true, // Use Audio PLL for precise 24kHz / 16kHz clock
+        .use_apll = false, // ESP32-S3 does not support APLL; uses system PLL
         .tx_desc_auto_clear = true, // Auto clear underflow DMA descriptors
         .fixed_mclk = 0
     };

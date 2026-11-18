@@ -93,6 +93,13 @@ const char* DisplayController::getHardwareStatusStr() const {
 bool DisplayController::begin() {
     if (isInitialized) return true;
 
+#if FEATURE_TOUCH_XPT2046_PRESENT
+    // Ensure Touch CS is held HIGH (inactive) and IRQ pulled UP to prevent SPI bus contention
+    pinMode(PIN_TOUCH_CS, OUTPUT);
+    digitalWrite(PIN_TOUCH_CS, HIGH);
+    pinMode(PIN_TOUCH_IRQ, INPUT_PULLUP);
+#endif
+
     Serial.println("[Display] Initializing ILI9341 SPI Display Driver...");
     if (!gfx.init()) {
         Serial.println("[Display] ERROR: Failed to initialize LovyanGFX display driver!");

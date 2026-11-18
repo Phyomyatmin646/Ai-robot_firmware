@@ -438,12 +438,20 @@ void UIManager::handleScreenTouch(int32_t x, int32_t y) {
             lookResetTime = now + 1800;
             Serial.println("[TouchScreen] Right poke: Robot looking right.");
         }
-        // Center poke (Eyes/Cheek/Nose): playful wink and cute chime!
+        // Center poke (Eyes/Cheek/Nose): playful wink, cute chime, and start conversation with Memo!
         else {
             isWinking = true;
             winkEndTime = now + 1200;
             AudioOutput::getInstance().playCuteChime();
-            Serial.println("[TouchScreen] Face poke: Robot winking happily!");
+            Serial.println("[TouchScreen] Face touch: Robot winking & activating voice session with Memo!");
+
+            // If robot is IDLE, touching the face activates Voice Session to talk to Memo!
+            if (DeviceManager::getInstance().getState() == RobotState::IDLE) {
+                AppEvent ev{};
+                ev.type = EventType::VOICE_SESSION_START;
+                snprintf(ev.text, sizeof(ev.text), "screen_touch");
+                EventManager::getInstance().postEvent(ev);
+            }
         }
     }
 }

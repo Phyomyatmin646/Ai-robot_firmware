@@ -26,13 +26,15 @@ bool WakeWordEngine::begin() {
     srModels = esp_srmodel_init("model");
     if (!srModels) {
         Serial.println("[WakeWordEngine] NOTICE: Flash 'model' partition not mounted or empty.");
-        Serial.println("[WakeWordEngine] Note: Flash 'srmodels.bin' to offset 0xc10000 for flash-mapped WakeNet9.");
-    } else {
-        char* foundName = esp_srmodel_filter(srModels, ESP_WN_PREFIX, "hiesp");
-        if (foundName) {
-            strncpy(activeModelName, foundName, sizeof(activeModelName) - 1);
-            Serial.printf("[WakeWordEngine] Found WakeNet model in partition: %s\n", activeModelName);
-        }
+        Serial.println("[WakeWordEngine] Running in Head-Touch Push-to-Talk mode (Flash 'srmodels.bin' to offset 0xc10000 for WakeNet9).");
+        status = WakeNetStatus::MODEL_PARTITION_NOT_FOUND;
+        return false;
+    }
+
+    char* foundName = esp_srmodel_filter(srModels, ESP_WN_PREFIX, "hiesp");
+    if (foundName) {
+        strncpy(activeModelName, foundName, sizeof(activeModelName) - 1);
+        Serial.printf("[WakeWordEngine] Found WakeNet model in partition: %s\n", activeModelName);
     }
 
     // 2. Obtain WakeNet interface handle for target model ("wn9_hiesp")
@@ -57,18 +59,10 @@ bool WakeWordEngine::begin() {
             wakenetIface->set_det_threshold(modelData, 0.65f, 1);
 
             modelLoaded = true;
-            bool micDetected = (AudioInput::getInstance().getHardwareStatus() == AudioInputHwStatus::AUDIO_INPUT_VALID);
-            if (micDetected) {
-                status = WakeNetStatus::READY_WAKENET9_HIESP;
-                activeListening = true;
-                Serial.printf("[WakeWordEngine] Model: MODEL_LOADED (Model: %s, Word: \"%s\") | Audio: AUDIO_INPUT_VALID -> Detection READY.\n",
-                              activeModelName, activeWakeWord);
-            } else {
-                status = WakeNetStatus::MODEL_LOADED_AWAITING_MIC;
-                activeListening = false;
-                Serial.printf("[WakeWordEngine] Model: MODEL_LOADED (Model: %s, Word: \"%s\") | Audio: AWAITING_AUDIO_HARDWARE (Microphone not detected; inference idle until mic attached).\n",
-                              activeModelName, activeWakeWord);
-            }
+            status = WakeNetStatus::READY_WAKENET9_HIESP;
+            activeListening = true;
+            Serial.printf("[WakeWordEngine] Model: MODEL_LOADED (Model: %s, Word: \"%s\") -> Wake-Word Detection READY.\n",
+                          activeModelName, activeWakeWord);
             return true;
         } else {
             Serial.println("[WakeWordEngine] WARNING: WakeNet model create returned NULL. Flash partition data required.");

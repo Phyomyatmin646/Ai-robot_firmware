@@ -223,6 +223,10 @@ void setup() {
 #endif
     delay(500);
 
+    // 0. Ensure Onboard WS2812 RGB LED (GPIO 48) on YD-ESP32-S3 is held LOW
+    pinMode(48, OUTPUT);
+    digitalWrite(48, LOW);
+
     Serial.println("\n=======================================================");
     Serial.printf("  🤖 %s v%s\n", FIRMWARE_NAME, FIRMWARE_VERSION);
     Serial.printf("  Hardware: %s\n", HARDWARE_VERSION);
