@@ -77,22 +77,52 @@ LGFX_ESP32S3_V2775::LGFX_ESP32S3_V2775() {
     setPanel(&_panel_instance);
 }
 
+const char* DisplayController::getHardwareStatusStr() const {
+    switch (hwStatus) {
+        case DisplayHwStatus::HARDWARE_RESPONDING:
+            return "HARDWARE_RESPONDING (Display active on SPI)";
+        case DisplayHwStatus::NOT_DETECTED:
+            return "NOT_DETECTED (SPI MISO silent/unconnected)";
+        case DisplayHwStatus::DRIVER_INITIALIZED:
+            return "DRIVER_INITIALIZED (SPI initialized)";
+        default:
+            return "UNINITIALIZED";
+    }
+}
+
 bool DisplayController::begin() {
-    Serial.println("[Display] Initializing ILI9341 SPI Display...");
+    if (isInitialized) return true;
+
+    Serial.println("[Display] Initializing ILI9341 SPI Display Driver...");
     if (!gfx.init()) {
-        Serial.println("[Display] ERROR: Failed to initialize LovyanGFX display!");
+        Serial.println("[Display] ERROR: Failed to initialize LovyanGFX display driver!");
+        hwStatus = DisplayHwStatus::UNINITIALIZED;
         return false;
     }
+
+    isInitialized = true;
+    hwStatus = DisplayHwStatus::DRIVER_INITIALIZED;
+    Serial.println("[Display] Driver: DRIVER_INITIALIZED (SPI2_HOST, 40MHz write, GPIO 11/12/10/9/14/4).");
 
     gfx.setRotation(TFT_ROTATION);
     setBrightness(currentBrightness);
     gfx.fillScreen(TFT_BLACK);
+
+    // Physical verification: Read data from display over MISO (GPIO 13).
+    // An unconnected display has floating/silent MISO returning 0x00000000 or 0xFFFFFFFF.
+    displayId = gfx.readData32();
+    if (displayId == 0x00000000 || displayId == 0xFFFFFFFF) {
+        hwStatus = DisplayHwStatus::NOT_DETECTED;
+        Serial.printf("[Display] Hardware: NOT_DETECTED (SPI MISO returned 0x%08X; display unattached or write-only).\n", (unsigned int)displayId);
+    } else {
+        hwStatus = DisplayHwStatus::HARDWARE_RESPONDING;
+        Serial.printf("[Display] Hardware: HARDWARE_RESPONDING (Read data: 0x%08X confirmed).\n", (unsigned int)displayId);
+    }
+
     gfx.setTextColor(TFT_WHITE, TFT_BLACK);
     gfx.setTextSize(2);
     gfx.drawString("ESP32-S3 AI Robot", 20, 20);
 
-    isInitialized = true;
-    Serial.println("[Display] ILI9341 display initialized successfully.");
     return true;
 }
 

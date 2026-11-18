@@ -18,6 +18,13 @@ public:
     LGFX_ESP32S3_V2775();
 };
 
+enum class DisplayHwStatus {
+    UNINITIALIZED,
+    DRIVER_INITIALIZED,
+    HARDWARE_RESPONDING,
+    NOT_DETECTED
+};
+
 class DisplayController {
 public:
     static DisplayController& getInstance() {
@@ -31,6 +38,10 @@ public:
 
     LGFX_ESP32S3_V2775& getDisplay() { return gfx; }
 
+    DisplayHwStatus getHardwareStatus() const { return hwStatus; }
+    const char* getHardwareStatusStr() const;
+    uint32_t getDisplayId() const { return displayId; }
+
     // Screen dimensions
     int32_t width() const { return TFT_WIDTH; }
     int32_t height() const { return TFT_HEIGHT; }
@@ -41,6 +52,8 @@ public:
 private:
     DisplayController() = default;
 
+    DisplayHwStatus hwStatus = DisplayHwStatus::UNINITIALIZED;
+    uint32_t displayId = 0;
     LGFX_ESP32S3_V2775 gfx;
     uint8_t currentBrightness = DEFAULT_BRIGHTNESS;
     bool isInitialized = false;

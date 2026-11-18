@@ -19,7 +19,7 @@ public:
     void begin();
     void update(); // Called in network task loop
 
-    bool isConnected() { return client.available(); }
+    bool isConnected() const { return wsConnected; }
     bool isAuthenticated() const { return authenticated; }
 
     // Outbound Telemetry & Control (JSON Text Frames)
@@ -28,6 +28,7 @@ public:
     bool sendAudioStart(const String& sessionId, uint32_t sampleRate = 16000);
     bool sendAudioEnd(uint32_t totalChunks);
     bool sendSensorUpdate(const String& key, const String& value);
+    bool sendRfidScan(const String& cardUid, const String& cardDataJson = "");
 
     // Outbound Audio Streaming (Raw Binary Frames)
     bool sendAudioChunk(const uint8_t* pcmData, size_t length);
@@ -40,6 +41,7 @@ private:
     void handleTextMessage(const WebsocketsMessage& msg);
     void handleBinaryMessage(const WebsocketsMessage& msg);
     void connect();
+    void setupClientInstance(const String& deviceId, const String& apiKey);
 
     // FreeRTOS thread safety across Core 0 (Network) and Core 1 (Audio/Sensors)
     SemaphoreHandle_t wsMutex = nullptr;
@@ -54,6 +56,10 @@ private:
     }
 
     WebsocketsClient client;
+    String configuredDeviceId = "";
+    String configuredApiKey = "";
+    bool clientConfigured = false;
+    bool wsConnected = false;
     bool authenticated = false;
     bool authFailed = false;
 

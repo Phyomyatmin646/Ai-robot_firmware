@@ -2,6 +2,7 @@
 #include "services/device_manager.h"
 #include "services/config_manager.h"
 #include "hardware/rfid.h"
+#include "hardware/audio_output.h"
 #include "network/wifi_manager.h"
 #include "network/websocket_client.h"
 #include "firmware_version.h"
@@ -69,11 +70,11 @@ void UIManager::drawStatusBar() {
         canvas.print("RFID");
     }
 
-    // 4. Volume Indicator (Right side)
+    // 4. Volume & HUD Touch Hint (Right side)
     uint8_t vol = ConfigManager::getInstance().getVolume();
     canvas.setTextColor(canvas.color565(220, 235, 250));
-    canvas.setCursor(260, 6);
-    canvas.printf("Vol:%d%%", vol);
+    canvas.setCursor(250, 6);
+    canvas.printf("V:%d%%[HUD]", vol);
 }
 
 void UIManager::drawIdleFace(int eyeBlink) {
@@ -81,12 +82,20 @@ void UIManager::drawIdleFace(int eyeBlink) {
     const uint16_t COLOR_BG = canvas.color565(14, 40, 78);
     canvas.fillRect(0, 21, TFT_WIDTH, TFT_HEIGHT - 21, COLOR_BG);
 
+    unsigned long now = millis();
+    if (now > lookResetTime) {
+        lookOffsetX = 0;
+    }
+    if (now > winkEndTime) {
+        isWinking = false;
+    }
+
     // Landscape 320x240 eye geometry: wide horizontal pills / rounded rectangles
     int eyeW = 76;
     int eyeH = 50;
     int eyeR = 24; // Smooth capsule pill radius
-    int leftX = 58;
-    int rightX = 186;
+    int leftX = 58 + lookOffsetX;
+    int rightX = 186 + lookOffsetX;
     int eyeY = 75;
 
     uint16_t eyeColor = TFT_WHITE;
@@ -96,6 +105,12 @@ void UIManager::drawIdleFace(int eyeBlink) {
         // Natural blinking phase (horizontal closed slit eyes)
         canvas.fillRoundRect(leftX, eyeY + 21, eyeW, 8, 4, eyeColor);
         canvas.fillRoundRect(rightX, eyeY + 21, eyeW, 8, 4, eyeColor);
+    } else if (isWinking) {
+        // Playful wink: Left eye happy wink slit, Right eye wide open with shine
+        canvas.fillRoundRect(leftX, eyeY + 21, eyeW, 8, 4, eyeColor);
+        canvas.drawRoundRect(rightX - 2, eyeY - 2, eyeW + 4, eyeH + 4, eyeR + 2, glowBorder);
+        canvas.fillRoundRect(rightX, eyeY, eyeW, eyeH, eyeR, eyeColor);
+        canvas.fillCircle(rightX + 20, eyeY + 16, 5, canvas.color565(230, 245, 255));
     } else {
         // Subtle outer glowing contour
         canvas.drawRoundRect(leftX - 2, eyeY - 2, eyeW + 4, eyeH + 4, eyeR + 2, glowBorder);
@@ -110,8 +125,18 @@ void UIManager::drawIdleFace(int eyeBlink) {
         canvas.fillCircle(rightX + 20, eyeY + 16, 5, canvas.color565(230, 245, 255));
     }
 
-    // Idle friendly subtle smile mouth
-    canvas.fillRoundRect(160 - 20, 172, 40, 8, 4, canvas.color565(200, 240, 255));
+    // Mouth: happy smile (slightly wider and cheerful when winking/poked)
+    if (isWinking) {
+        canvas.fillRoundRect(160 - 24, 168, 48, 12, 6, canvas.color565(0, 230, 118));
+    } else {
+        canvas.fillRoundRect(160 - 20, 172, 40, 8, 4, canvas.color565(200, 240, 255));
+    }
+
+    // Touch feedback sparkle/ripple if screen was tapped
+    if (now < rippleEndTime && lastTouchRippleX >= 0) {
+        canvas.drawCircle(lastTouchRippleX, lastTouchRippleY, 8, canvas.color565(0, 229, 255));
+        canvas.drawCircle(lastTouchRippleX, lastTouchRippleY, 14, canvas.color565(80, 190, 255));
+    }
 }
 
 void UIManager::drawListeningFace(unsigned long timeMs) {
@@ -338,12 +363,94 @@ void UIManager::drawSettingsScreen() {
     canvas.drawRect(100, y - 2, 200, 8, canvas.color565(70, 70, 70));
     canvas.fillRect(102, y, (bright * 196) / 100, 4, canvas.color565(0, 229, 255));
 
-    canvas.setTextColor(canvas.color565(150, 160, 175));
+    canvas.setTextColor(canvas.color565(0, 229, 255));
     canvas.setCursor(16, 215);
-    canvas.print("Serial CLI 'SCREEN:TOGGLE' to return to Robot Face");
+    canvas.print("Touch sliders to adjust | Tap bottom to exit");
+}
+
+void UIManager::processTouch() {
+    int32_t touchX = -1, touchY = -1;
+    if (DisplayController::getInstance().getTouch(&touchX, &touchY)) {
+        if (touchX >= 0 && touchY >= 0 && touchX < TFT_WIDTH && touchY < TFT_HEIGHT) {
+            handleScreenTouch(touchX, touchY);
+        }
+    }
+}
+
+void UIManager::handleScreenTouch(int32_t x, int32_t y) {
+    unsigned long now = millis();
+    if (now - lastTouchDebounce < 200) {
+        return; // debounce rapid touches
+    }
+    lastTouchDebounce = now;
+
+    // 1. Top status bar tap: Toggle between Robot Face and Settings HUD
+    if (y < 28) {
+        toggleScreen();
+        AudioOutput::getInstance().playCuteChime();
+        Serial.printf("[TouchScreen] Top bar tapped. Active screen toggled to %s.\n",
+                      (activeScreen == CurrentScreen::ROBOT_FACE) ? "ROBOT_FACE" : "SETTINGS_VIEW");
+        return;
+    }
+
+    // 2. In Settings View: Interactive touch sliders & tap-to-exit
+    if (activeScreen == CurrentScreen::SETTINGS_VIEW) {
+        // Volume Slider row (y around 135..165)
+        if (y >= 130 && y <= 160 && x >= 90 && x <= 310) {
+            int clampedX = (x < 102) ? 102 : ((x > 298) ? 298 : x);
+            uint8_t newVol = (uint8_t)(((clampedX - 102) * 100) / 196);
+            ConfigManager::getInstance().setVolume(newVol);
+            AudioOutput::getInstance().setVolume(newVol);
+            WebSocketClientManager::getInstance().sendSensorUpdate("currentVolume", String(newVol));
+            Serial.printf("[TouchScreen] Volume adjusted by touch: %u%%\n", newVol);
+            return;
+        }
+        // Brightness Slider row (y around 165..195)
+        if (y >= 165 && y <= 195 && x >= 90 && x <= 310) {
+            int clampedX = (x < 102) ? 102 : ((x > 298) ? 298 : x);
+            uint8_t newBright = (uint8_t)(((clampedX - 102) * 100) / 196);
+            if (newBright < 10) newBright = 10;
+            ConfigManager::getInstance().setBrightness(newBright);
+            DisplayController::getInstance().setBrightness(newBright);
+            Serial.printf("[TouchScreen] Brightness adjusted by touch: %u%%\n", newBright);
+            return;
+        }
+        // Tapping anywhere else in Settings view returns to Robot Face
+        setScreen(CurrentScreen::ROBOT_FACE);
+        return;
+    }
+
+    // 3. In Robot Face: Interactive Gaze Tracking & Pokable Facial Expressions
+    if (activeScreen == CurrentScreen::ROBOT_FACE) {
+        lastTouchRippleX = x;
+        lastTouchRippleY = y;
+        rippleEndTime = now + 400;
+
+        // Left poke: robot looks left
+        if (x < 115) {
+            lookOffsetX = -14;
+            lookResetTime = now + 1800;
+            Serial.println("[TouchScreen] Left poke: Robot looking left.");
+        }
+        // Right poke: robot looks right
+        else if (x > 205) {
+            lookOffsetX = +14;
+            lookResetTime = now + 1800;
+            Serial.println("[TouchScreen] Right poke: Robot looking right.");
+        }
+        // Center poke (Eyes/Cheek/Nose): playful wink and cute chime!
+        else {
+            isWinking = true;
+            winkEndTime = now + 1200;
+            AudioOutput::getInstance().playCuteChime();
+            Serial.println("[TouchScreen] Face poke: Robot winking happily!");
+        }
+    }
 }
 
 void UIManager::update() {
+    processTouch();
+
     unsigned long now = millis();
     // Prioritize audio recording latency: throttle UI to ~15 FPS during LISTENING, ~30 FPS otherwise
     uint32_t minFrameInterval = (DeviceManager::getInstance().getState() == RobotState::LISTENING) ? 66 : 33;

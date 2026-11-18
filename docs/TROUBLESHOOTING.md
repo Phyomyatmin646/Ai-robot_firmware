@@ -62,5 +62,5 @@
 ### 4.2 Touch Screen Not Responding
 - **Cause:** Touch controller is unverified or lacks dedicated XPT2046 hardware.
 - **Fix:**
-  - Use the capacitive Push-to-Talk touch sensor (GPIO 48) as the primary tactile interaction method.
+  - Use the capacitive head-touch sensor (GPIO 38) as the primary tactile interaction method.
   - Check whether the physical 2.8" TFT board includes the XPT2046 IC chip before enabling resistive touch SPI.

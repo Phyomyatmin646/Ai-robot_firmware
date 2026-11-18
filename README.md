@@ -53,7 +53,7 @@ pio --version
 | | ILI9341 BL (Backlight) | **GPIO 4** | Left Header (IO4) | PWM Brightness (LEDC) |
 | **RFID** | PN532 RXD | **GPIO 1** | Right Header (IO1) | UART1 RX (from PN532 TX) |
 | | PN532 TXD | **GPIO 2** | Right Header (IO2) | UART1 TX (to PN532 RX) |
-| **Sensors** | TTP223 Touch (PTT) | **GPIO 48** | Right Header (IO48) | Digital Touch (Active HIGH) |
+| **Sensors** | TTP223 Touch (Head) | **GPIO 38** | Left Header (IO38) | Digital Touch (Active HIGH) |
 | **Buttons** | Volume Up Button | **GPIO 41** | Right Header (IO41) | Active LOW (Internal Pull-Up) |
 | | Volume Down Button | **GPIO 42** | Right Header (IO42) | Active LOW (Internal Pull-Up) |
 

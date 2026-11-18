@@ -25,12 +25,16 @@ public:
     CurrentScreen getScreen() const { return activeScreen; }
     void toggleScreen();
 
+    // Process on-screen touch interactions
+    void processTouch();
+
 private:
     UIManager() = default;
 
     void drawStatusBar();
     void drawRobotFace();
     void drawSettingsScreen();
+    void handleScreenTouch(int32_t x, int32_t y);
 
     // Robot Facial Expressions
     void drawIdleFace(int eyeBlink);
@@ -45,4 +49,14 @@ private:
     unsigned long lastFrameTime = 0;
     unsigned long lastBlinkTime = 0;
     int blinkPhase = 0; // 0: Open, 1: Closing, 2: Closed, 3: Opening
+
+    // Touch Screen Interactive Features
+    int lookOffsetX = 0;
+    unsigned long lookResetTime = 0;
+    bool isWinking = false;
+    unsigned long winkEndTime = 0;
+    unsigned long lastTouchDebounce = 0;
+    int32_t lastTouchRippleX = -1;
+    int32_t lastTouchRippleY = -1;
+    unsigned long rippleEndTime = 0;
 };

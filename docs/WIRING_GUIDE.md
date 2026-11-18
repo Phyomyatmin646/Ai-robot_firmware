@@ -76,12 +76,12 @@
 
 ---
 
-### 2.6 One-Channel Touch Sensor Module (Push-to-Talk)
-| Sensor Pin | V2775 Board Header Pin | Description |
+### 2.6 One-Channel Touch Sensor Module (Head Touch Interaction)
+| Sensor Pin | ESP32-S3 Pin | Description |
 |---|---|---|
 | **VCC** | `3V3` | Power Supply |
 | **GND** | `GND` | Ground |
-| **SIG / OUT** | `IO48` | Digital Signal (High on touch) |
+| **SIG / OUT** | `IO38` | Digital Signal (High on touch) - Moved from IO48 due to Onboard WS2812 RGB LED |
 
 ---
 

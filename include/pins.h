@@ -41,10 +41,10 @@
 #define PIN_TFT_BL            4     // Backlight / LED PWM Brightness Control
 
 // ============================================================================
-// 4. Touchscreen Controller: XPT2046 (UNVERIFIED)
-// Status: UNVERIFIED. Set to true only if physical display module includes XPT2046.
+// 4. Touchscreen Controller: XPT2046 (2.8" SPI TFT Touch Screen)
+// Enables interactive on-screen touch, eye-tracking, and HUD dashboard toggle.
 // ============================================================================
-#define FEATURE_TOUCH_XPT2046_PRESENT 0
+#define FEATURE_TOUCH_XPT2046_PRESENT 1
 #define PIN_TOUCH_CS          8     // Touch Chip Select (T_CS)
 #define PIN_TOUCH_IRQ         18    // Touch Interrupt (T_IRQ)
 
@@ -57,10 +57,12 @@
 #define PN532_UART_NUM        1     // HardwareSerial port 1
 
 // ============================================================================
-// 6. One-Channel Capacitive Touch Sensor (Push-to-Talk)
+// 6. One-Channel Capacitive Touch Sensor (Head Touch Interaction)
 // TTP223 or equivalent digital touch sensor module
+// NOTE: GPIO 48 is hardwired to the onboard WS2812 RGB LED on YD-ESP32-S3 boards.
+// NOTE: GPIO 1 is used for PN532 RFID RX, so GPIO 38 is used for TTP223.
 // ============================================================================
-#define PIN_TOUCH_SENSOR      48    // Digital Input (Active HIGH on touch)
+#define PIN_TOUCH_SENSOR      38    // Digital Input (Active HIGH on touch)
 
 // ============================================================================
 // 7. Physical Push Buttons (Volume Up / Volume Down)

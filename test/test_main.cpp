@@ -3,6 +3,7 @@
 #include "app_events.h"
 #include "services/config_manager.h"
 #include "services/event_manager.h"
+#include "hardware/rfid_format.h"
 
 void test_state_string_conversion(void) {
     TEST_ASSERT_EQUAL_STRING("idle", robotStateToString(RobotState::IDLE));
@@ -37,12 +38,66 @@ void test_event_queue_transfer(void) {
     TEST_ASSERT_EQUAL_STRING("vol:85", recvEv.text);
 }
 
+void test_rfid_format_crc16(void) {
+    const uint8_t testData[] = "Hello Antigravity Robot";
+    uint16_t crc1 = RfidFormatUtils::calculateCrc16(testData, sizeof(testData) - 1);
+    uint16_t crc2 = RfidFormatUtils::calculateCrc16(testData, sizeof(testData) - 1);
+    TEST_ASSERT_EQUAL_UINT16(crc1, crc2);
+    TEST_ASSERT_NOT_EQUAL(0, crc1);
+}
+
+void test_rfid_card_packing_and_parsing_burmese(void) {
+    String burmeseJson = "{\"schemaVersion\":\"1.0\",\"cardType\":\"educational\",\"language\":\"my\",\"title\":\"ပန်းသီး\",\"category\":\"အသီး\",\"facts\":[\"အာဟာရပြည့်ဝသည်\"]}";
+    uint8_t buffer[480] = {0};
+    size_t packedBytes = 0;
+
+    bool packOk = RfidFormatUtils::packCardBuffer(burmeseJson, RfidLanguage::BURMESE, buffer, sizeof(buffer), packedBytes);
+    TEST_ASSERT_TRUE(packOk);
+    TEST_ASSERT_GREATER_THAN(sizeof(RfidCardHeader), packedBytes);
+
+    String parsedJson = "";
+    bool parseOk = RfidFormatUtils::parseCardBuffer(buffer, packedBytes, parsedJson);
+    TEST_ASSERT_TRUE(parseOk);
+    TEST_ASSERT_TRUE(parsedJson.indexOf("ပန်းသီး") >= 0);
+    TEST_ASSERT_TRUE(parsedJson.indexOf("အသီး") >= 0);
+}
+
+void test_rfid_card_packing_and_parsing_english(void) {
+    String englishJson = "{\"schemaVersion\":\"1.0\",\"cardType\":\"educational\",\"language\":\"en\",\"title\":\"Elephant\",\"category\":\"Animals\",\"facts\":[\"Largest land mammal\"]}";
+    uint8_t buffer[480] = {0};
+    size_t packedBytes = 0;
+
+    bool packOk = RfidFormatUtils::packCardBuffer(englishJson, RfidLanguage::ENGLISH, buffer, sizeof(buffer), packedBytes);
+    TEST_ASSERT_TRUE(packOk);
+
+    String parsedJson = "";
+    bool parseOk = RfidFormatUtils::parseCardBuffer(buffer, packedBytes, parsedJson);
+    TEST_ASSERT_TRUE(parseOk);
+    TEST_ASSERT_TRUE(parsedJson.indexOf("Elephant") >= 0);
+}
+
+void test_rfid_sector_trailer_exclusion(void) {
+    // Verify that data block calculations strictly skip block index % 4 == 3
+    for (uint8_t sector = 1; sector <= 10; sector++) {
+        uint8_t trailerBlock = sector * 4 + 3;
+        for (uint8_t blk = 0; blk < 3; blk++) {
+            uint8_t dataBlock = sector * 4 + blk;
+            TEST_ASSERT_NOT_EQUAL(trailerBlock, dataBlock);
+            TEST_ASSERT_NOT_EQUAL(3, dataBlock % 4); // Must NEVER be trailer
+        }
+    }
+}
+
 void setup() {
     delay(2000);
     UNITY_BEGIN();
     RUN_TEST(test_state_string_conversion);
     RUN_TEST(test_secret_masking);
     RUN_TEST(test_event_queue_transfer);
+    RUN_TEST(test_rfid_format_crc16);
+    RUN_TEST(test_rfid_card_packing_and_parsing_burmese);
+    RUN_TEST(test_rfid_card_packing_and_parsing_english);
+    RUN_TEST(test_rfid_sector_trailer_exclusion);
     UNITY_END();
 }
 

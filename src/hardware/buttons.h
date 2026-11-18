@@ -14,6 +14,12 @@ public:
     void begin();
     void update(); // Called periodically in sensor task (e.g. every 20ms)
 
+    const char* getHardwareStatusStr() const {
+        return (digitalRead(PIN_BTN_VOL_UP) == HIGH && digitalRead(PIN_BTN_VOL_DOWN) == HIGH)
+            ? "IDLE_READY (GPIO 41/42 pulled UP, stable HIGH)"
+            : "ACTIVE_OR_FLOATING";
+    }
+
 private:
     ButtonController() = default;
 

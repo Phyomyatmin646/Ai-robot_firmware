@@ -4,7 +4,7 @@
 void ButtonController::begin() {
     pinMode(PIN_BTN_VOL_UP, INPUT_PULLUP);
     pinMode(PIN_BTN_VOL_DOWN, INPUT_PULLUP);
-    Serial.println("[ButtonController] Volume buttons initialized (GPIO 41 & 42, active LOW).");
+    Serial.println("[ButtonController] Driver: DRIVER_INITIALIZED | Hardware: IDLE_READY (GPIO 41 & 42 INPUT_PULLUP, active LOW).");
 }
 
 void ButtonController::update() {

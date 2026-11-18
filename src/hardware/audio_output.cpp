@@ -1,4 +1,9 @@
 #include "hardware/audio_output.h"
+#include <cmath>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 bool AudioOutput::begin() {
     Serial.println("[AudioOutput] Initializing MAX98357A Amplifier (I2S_NUM_1)...");
@@ -40,8 +45,9 @@ bool AudioOutput::begin() {
     setVolume(currentVolume);
 
     isInitialized = true;
-    Serial.printf("[AudioOutput] MAX98357A I2S initialized (Sample Rate: %u Hz, Gain: %.2f).\n",
+    Serial.printf("[AudioOutput] Driver: DRIVER_INITIALIZED (I2S_NUM_1 TX configured at %u Hz, Gain: %.2f).\n",
                   currentSampleRate, gainMultiplier);
+    Serial.println("[AudioOutput] Hardware: NOT_VERIFIABLE (MAX98357A is simplex I2S TX only; no digital feedback/telemetry pin).");
     return true;
 }
 
@@ -93,4 +99,48 @@ void AudioOutput::stopAndFlush() {
     if (!isInitialized) return;
     i2s_zero_dma_buffer(i2sPort);
     Serial.println("[AudioOutput] DMA buffers flushed (Barge-in / Stop).");
+}
+
+void AudioOutput::playCuteChime() {
+    if (!isInitialized) return;
+
+    // Synthesize a cute, cheerful two-stage rising robot chirp (180ms total)
+    // Stage 1: 880 Hz (A5), Stage 2: 1320 Hz (E6)
+    const uint32_t sampleRate = currentSampleRate;
+    const size_t totalSamples = (sampleRate * 180) / 1000; // 180 ms
+    int16_t buffer[128];
+
+    float f1 = 880.0f;
+    float f2 = 1320.0f;
+    float phase = 0.0f;
+
+    for (size_t i = 0; i < totalSamples; ) {
+        size_t batch = (totalSamples - i < 128) ? (totalSamples - i) : 128;
+        for (size_t b = 0; b < batch; b++) {
+            size_t sampleIdx = i + b;
+            float progress = (float)sampleIdx / (float)totalSamples;
+            float freq = (progress < 0.45f) ? f1 : f2;
+
+            // Envelope: quick attack, smooth exponential decay
+            float env = 1.0f;
+            if (progress < 0.05f) {
+                env = progress / 0.05f;
+            } else {
+                float decayProg = (progress - 0.05f) / 0.95f;
+                env = (1.0f - decayProg) * (1.0f - decayProg);
+            }
+
+            phase += 2.0f * (float)M_PI * freq / (float)sampleRate;
+            if (phase >= 2.0f * (float)M_PI) phase -= 2.0f * (float)M_PI;
+
+            // Harmonic warmth with 2nd harmonic
+            float val = (sinf(phase) + 0.25f * sinf(2.0f * phase)) * env * 16000.0f * (currentVolume / 100.0f);
+            buffer[b] = (int16_t)val;
+        }
+
+        size_t bytesWritten = 0;
+        i2s_write(i2sPort, buffer, batch * sizeof(int16_t), &bytesWritten, pdMS_TO_TICKS(50));
+        i += batch;
+    }
+    Serial.println("[AudioOutput] Played local cute head-touch chime.");
 }

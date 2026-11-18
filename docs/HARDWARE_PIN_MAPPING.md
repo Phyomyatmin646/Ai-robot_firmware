@@ -50,7 +50,7 @@
 | **PN532 RFID Module** | TXD (to ESP32 RX)| **GPIO 1** | Right Header (IO1) | UART RX (UART1) | 3.3V logic |
 | | RXD (from ESP32 TX)| **GPIO 2** | Right Header (IO2) | UART TX (UART1) | 3.3V logic |
 | | VCC / GND | **3.3V or 5V / GND**| Right Power Rail | Module Power | 3.3V or 5V (Check DIP switch) |
-| **Touch Sensor (PTT)** | OUT (Digital) | **GPIO 48** | Right Header (IO48) | Digital Input | 3.3V logic |
+| **Touch Sensor (TTP223)** | OUT (Digital) | **GPIO 38** | Left Header (IO38) | Digital Input | 3.3V logic (Moved from 48 due to WS2812 RGB LED) |
 | | VCC / GND | **3.3V / GND** | Right Power Rail | Module Power | 3.3V |
 | **Push Button: Vol Up** | Pin 1 to GPIO, Pin 2 to GND | **GPIO 41** | Right Header (IO41) | Active LOW (Internal Pull-Up) | 3.3V |
 | **Push Button: Vol Down**| Pin 1 to GPIO, Pin 2 to GND | **GPIO 42** | Right Header (IO42) | Active LOW (Internal Pull-Up) | 3.3V |

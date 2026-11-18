@@ -1,12 +1,21 @@
 #include "network/websocket_client.h"
+#include "network/ca_certificates.h"
 #include "hardware/audio_output.h"
 #include "hardware/display.h"
+#include <WiFiClientSecure.h>
 
 void WebSocketClientManager::begin() {
     if (!wsMutex) {
         wsMutex = xSemaphoreCreateMutex();
     }
+    Serial.println("[WebSocketClientManager] Initialized.");
+}
 
+void WebSocketClientManager::setupClientInstance(const String& deviceId, const String& apiKey) {
+    // 1. Instantiate a clean WebsocketsClient instance to prevent header vector accumulation
+    client = WebsocketsClient();
+
+    // 2. Register message and event callbacks exactly once on the fresh instance
     client.onMessage([this](WebsocketsMessage msg) {
         if (msg.isBinary()) {
             handleBinaryMessage(msg);
@@ -17,10 +26,12 @@ void WebSocketClientManager::begin() {
 
     client.onEvent([this](WebsocketsEvent event, String data) {
         if (event == WebsocketsEvent::ConnectionOpened) {
+            wsConnected = true;
             Serial.println("[WebSocket] TLS Connection Established. Waiting for device:connected handshake...");
         } else if (event == WebsocketsEvent::ConnectionClosed) {
-            Serial.printf("[WebSocket] Connection closed. Data: %s\n", data.c_str());
+            wsConnected = false;
             authenticated = false;
+            Serial.printf("[WebSocket] Connection closed. Data: %s\n", data.c_str());
             AppEvent ev{};
             ev.type = EventType::WS_DISCONNECTED;
             snprintf(ev.text, sizeof(ev.text), "ws:closed");
@@ -30,7 +41,17 @@ void WebSocketClientManager::begin() {
         }
     });
 
-    Serial.println("[WebSocketClientManager] Initialized.");
+    // 3. Configure production Root CA Certificates for strict TLS verification (Let's Encrypt ISRG Root X1 & ZeroSSL)
+    client.setCACert(PROD_ROOT_CA_BUNDLE);
+
+    // 4. Inject authentication headers exactly once per client instance
+    client.addHeader("X-Device-ID", deviceId);
+    client.addHeader("X-Device-Key", apiKey);
+
+    configuredDeviceId = deviceId;
+    configuredApiKey = apiKey;
+    clientConfigured = true;
+    Serial.println("[WebSocket] Client instance configured with production TLS CA and authentication headers.");
 }
 
 void WebSocketClientManager::connect() {
@@ -46,36 +67,58 @@ void WebSocketClientManager::connect() {
 
     String deviceId = ConfigManager::getInstance().getDeviceId();
     String apiKey = ConfigManager::getInstance().getDeviceApiKey();
+    deviceId.trim();
+    apiKey.trim();
+
+    if (deviceId.length() == 0 || apiKey.length() == 0) {
+        Serial.println("[WebSocket] Device ID or API Key is empty. Provisioning required.");
+        return;
+    }
+
+    // Verify system time via SNTP before attempting TLS CA certificate validation
+    time_t now = time(nullptr);
+    if (now < 1704067200) { // Jan 1, 2024 epoch threshold
+        Serial.println("[WebSocket] Waiting for SNTP time synchronization for TLS validation...");
+        return;
+    }
+    struct tm timeinfo;
+    gmtime_r(&now, &timeinfo);
+    char timeStr[32];
+    strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S UTC", &timeinfo);
+    Serial.printf("[WebSocket] System time: %s\n", timeStr);
 
     Serial.printf("[WebSocket] Connecting to wss://%s:%d%s ...\n",
                   DEFAULT_WS_HOST, DEFAULT_WS_PORT, DEFAULT_WS_PATH);
 
     if (!takeLock(pdMS_TO_TICKS(500))) return;
 
-    // Set custom authentication headers
-    client.addHeader("X-Device-ID", deviceId);
-    client.addHeader("X-Device-Key", apiKey);
+    // Check if client needs initial setup or credentials have changed at runtime
+    if (!clientConfigured || configuredDeviceId != deviceId || configuredApiKey != apiKey) {
+        setupClientInstance(deviceId, apiKey);
+    }
 
-    bool connected = client.connect(DEFAULT_WS_HOST, DEFAULT_WS_PORT, DEFAULT_WS_PATH);
+    bool connected = client.connectSecure(DEFAULT_WS_HOST, DEFAULT_WS_PORT, DEFAULT_WS_PATH);
+    Serial.printf("[WebSocket] connectSecure() returned: %s | wsConnected: %s\n",
+                  connected ? "TRUE" : "FALSE", wsConnected ? "TRUE" : "FALSE");
     giveLock();
 
     if (!connected) {
+        wsConnected = false;
+        authenticated = false;
         Serial.println("[WebSocket] Handshake failed. Will retry with backoff.");
     }
 }
 
 void WebSocketClientManager::update() {
-    bool hasData = false;
     if (takeLock(pdMS_TO_TICKS(20))) {
-        if (client.available()) {
+        if (wsConnected) {
             client.poll();
-            hasData = true;
         }
         giveLock();
     }
 
-    if (!hasData) {
-        authenticated = false;
+    // Only attempt reconnection if the WebSocket connection is truly closed/disconnected
+    if (!wsConnected) {
         unsigned long now = millis();
         if (WiFi.status() == WL_CONNECTED && !authFailed) {
             if (now - lastReconnectAttempt > reconnectInterval) {
@@ -188,6 +231,10 @@ void WebSocketClientManager::handleTextMessage(const WebsocketsMessage& msg) {
             AppEvent ev{};
             ev.type = EventType::CMD_STOP_AUDIO;
             EventManager::getInstance().postEvent(ev);
+        } else if (strcmp(cmdType, "reboot") == 0) {
+            Serial.println("[WebSocket] Remote command: reboot received. Restarting ESP32...");
+            delay(500);
+            ESP.restart();
         }
     } else if (strcmp(event, "reminder:alert") == 0) {
         const char* title = data["title"] | "Reminder Alert";
@@ -196,6 +243,36 @@ void WebSocketClientManager::handleTextMessage(const WebsocketsMessage& msg) {
         ev.type = EventType::VOICE_RESPONSE_START;
         snprintf(ev.text, sizeof(ev.text), "alert:%s", title);
         EventManager::getInstance().postEvent(ev);
+    } else if (strcmp(event, "rfid:scan:result") == 0) {
+        const char* title = data["title"] | "";
+        const char* status = data["status"] | "";
+        Serial.printf("[WebSocket] RFID Scan Result: %s (Status: %s)\n", title, status);
+    } else if (strcmp(event, "rfid:learning:start") == 0) {
+        const char* title = data["title"] | "Educational Card";
+        uint32_t sampleRate = data["sampleRate"] | 16000;
+        bool hasAudio = data["hasAudio"] | false;
+
+        AudioOutput::getInstance().setSampleRate(sampleRate);
+
+        AppEvent ev{};
+        ev.type = EventType::VOICE_RESPONSE_START;
+        ev.data.intValue = (int)sampleRate;
+        snprintf(ev.text, sizeof(ev.text), "learn:%s", title);
+        EventManager::getInstance().postEvent(ev);
+
+        Serial.printf("[WebSocket] RFID Educational Learning Started: %s (Audio: %s, Rate: %lu Hz)\n",
+                      title, hasAudio ? "YES" : "NO", (unsigned long)sampleRate);
+    } else if (strcmp(event, "rfid:learning:end") == 0) {
+        AppEvent ev{};
+        ev.type = EventType::VOICE_RESPONSE_END;
+        snprintf(ev.text, sizeof(ev.text), "learn:end");
+        EventManager::getInstance().postEvent(ev);
+
+        Serial.println("[WebSocket] RFID Educational Learning Completed.");
+    } else if (strcmp(event, "rfid:error") == 0) {
+        const char* code = data["code"] | "UNKNOWN";
+        const char* message = data["message"] | "";
+        Serial.printf("[WebSocket] RFID Error received (%s): %s\n", code, message);
     }
 }
 
@@ -309,6 +386,38 @@ bool WebSocketClientManager::sendSensorUpdate(const String& key, const String& v
     return sent;
 }
 
+bool WebSocketClientManager::sendRfidScan(const String& cardUid, const String& cardDataJson) {
+    if (!authenticated) return false;
+
+    JsonDocument doc;
+    doc["event"] = "rfid:scan";
+    JsonObject data = doc["data"].to<JsonObject>();
+    if (cardUid.length() > 0) {
+        data["cardUid"] = cardUid;
+    }
+
+    if (cardDataJson.length() > 0) {
+        JsonDocument cardDoc;
+        DeserializationError err = deserializeJson(cardDoc, cardDataJson);
+        if (!err) {
+            data["cardData"] = cardDoc;
+        } else {
+            data["cardData"] = cardDataJson;
+        }
+    }
+
+    String jsonStr;
+    serializeJson(doc, jsonStr);
+
+    if (!takeLock(pdMS_TO_TICKS(50))) return false;
+    bool sent = false;
+    if (client.available()) {
+        sent = client.send(jsonStr);
+    }
+    giveLock();
+    return sent;
+}
+
 bool WebSocketClientManager::sendAudioChunk(const uint8_t* pcmData, size_t length) {
     if (!pcmData || length == 0) return false;
 
@@ -329,5 +438,6 @@ void WebSocketClientManager::disconnect() {
         }
         giveLock();
     }
+    wsConnected = false;
     authenticated = false;
 }

@@ -11,6 +11,10 @@ void ConfigManager::begin() {
     cachedApiKey = prefsAuth.getString(NVS_KEY_API_KEY, "");
     prefsAuth.end();
 
+    // Sanitize any existing whitespace loaded from NVS
+    cachedDeviceId.trim();
+    cachedApiKey.trim();
+
     prefsCfg.begin(NVS_NAMESPACE_CONFIG, false);
     cachedVolume = prefsCfg.getUChar(NVS_KEY_VOLUME, DEFAULT_VOLUME);
     cachedMaxVolumeLimit = prefsCfg.getUChar(NVS_KEY_MAX_VOL_LIMIT, CONFIG_SOFTWARE_MAX_VOLUME_LIMIT);
@@ -72,15 +76,17 @@ String ConfigManager::getDeviceApiKey() const {
 void ConfigManager::setDeviceCredentials(const String& deviceId, const String& apiKey) {
     cachedDeviceId = deviceId;
     cachedApiKey = apiKey;
+    cachedDeviceId.trim();
+    cachedApiKey.trim();
 
     prefsAuth.begin(NVS_NAMESPACE_AUTH, false);
-    prefsAuth.putString(NVS_KEY_DEVICE_ID, deviceId);
-    prefsAuth.putString(NVS_KEY_API_KEY, apiKey);
+    prefsAuth.putString(NVS_KEY_DEVICE_ID, cachedDeviceId);
+    prefsAuth.putString(NVS_KEY_API_KEY, cachedApiKey);
     prefsAuth.end();
 
     Serial.printf("[ConfigManager] Device credentials saved: ID=%s, Key=%s\n",
-                  deviceId.c_str(),
-                  maskSecret(apiKey).c_str());
+                  cachedDeviceId.c_str(),
+                  maskSecret(cachedApiKey).c_str());
 }
 
 uint8_t ConfigManager::getVolume() const {

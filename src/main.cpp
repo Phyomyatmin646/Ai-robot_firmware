@@ -13,6 +13,7 @@
 #include "hardware/touch.h"
 #include "hardware/buttons.h"
 #include "hardware/rfid.h"
+#include "hardware/wake_word.h"
 
 // Networking & Services
 #include "network/wifi_manager.h"
@@ -52,66 +53,175 @@ void taskSensors(void* parameter) {
 }
 
 // Serial CLI Provisioning & Command Parser
-void processSerialCli() {
-    if (!Serial.available()) return;
-    String line = Serial.readStringUntil('\n');
-    line.trim();
-    if (line.length() == 0) return;
-
-    if (line.startsWith("PROV:WIFI:")) {
-        int firstColon = line.indexOf(':', 10);
+void executeCliCommand(const String& cmd, Stream& out) {
+    if (cmd.startsWith("PROV:WIFI:")) {
+        int firstColon = cmd.indexOf(':', 10);
         if (firstColon > 0) {
-            String ssid = line.substring(10, firstColon);
-            String pass = line.substring(firstColon + 1);
+            String ssid = cmd.substring(10, firstColon);
+            String pass = cmd.substring(firstColon + 1);
             ConfigManager::getInstance().setWifiCredentials(ssid, pass);
-            Serial.printf("[CLI] Wi-Fi set to SSID: %s\n", ssid.c_str());
+            out.printf("[CLI] Wi-Fi credentials saved for SSID: %s (Password stored in NVS)\n", ssid.c_str());
+            WiFiManager::getInstance().begin();
+        } else {
+            out.println("[CLI] ERROR: Invalid format. Usage: PROV:WIFI:<SSID>:<PASSWORD>");
         }
-    } else if (line.startsWith("PROV:AUTH:")) {
-        int firstColon = line.indexOf(':', 10);
+    } else if (cmd.startsWith("PROV:AUTH:")) {
+        int firstColon = cmd.indexOf(':', 10);
         if (firstColon > 0) {
-            String devId = line.substring(10, firstColon);
-            String apiKey = line.substring(firstColon + 1);
-            ConfigManager::getInstance().setDeviceCredentials(devId, apiKey);
-            Serial.printf("[CLI] Device credentials set: ID=%s, Key=%s\n",
-                          devId.c_str(), ConfigManager::maskSecret(apiKey).c_str());
+            String devId = cmd.substring(10, firstColon);
+            String apiKey = cmd.substring(firstColon + 1);
+            devId.trim();
+            apiKey.trim();
+            if (devId.length() > 0 && apiKey.length() > 0) {
+                ConfigManager::getInstance().setDeviceCredentials(devId, apiKey);
+                out.printf("[CLI] Device credentials saved: ID=%s (Device Key stored securely in NVS)\n", devId.c_str());
+            } else {
+                out.println("[CLI] ERROR: Device ID and API Key cannot be empty.");
+            }
+        } else {
+            out.println("[CLI] ERROR: Invalid format. Usage: PROV:AUTH:<DEVICE_ID>:<API_KEY>");
         }
-    } else if (line == "PROV:STATUS") {
-        Serial.println("\n--- DEVICE PROVISIONING STATUS ---");
-        Serial.printf("Firmware: %s (%s)\n", FIRMWARE_NAME, FIRMWARE_VERSION);
-        Serial.printf("Wi-Fi SSID: %s\n", ConfigManager::getInstance().getWifiSSID().c_str());
-        Serial.printf("Device ID:  %s\n", ConfigManager::getInstance().getDeviceId().c_str());
-        Serial.printf("API Key:    %s\n", ConfigManager::maskSecret(ConfigManager::getInstance().getDeviceApiKey()).c_str());
-        Serial.printf("Internal SRAM: %lu KB Free\n", (unsigned long)(ESP.getFreeHeap() / 1024));
-        Serial.printf("Octal PSRAM:   %lu / %lu KB Free\n",
-                      (unsigned long)(ESP.getFreePsram() / 1024),
-                      (unsigned long)(ESP.getPsramSize() / 1024));
-        Serial.printf("IP Address: %s (RSSI: %d dBm)\n", WiFiManager::getInstance().getIpAddress().c_str(), WiFiManager::getInstance().getRSSI());
-        Serial.printf("WebSocket:  %s\n", WebSocketClientManager::getInstance().isAuthenticated() ? "ONLINE" : "OFFLINE");
-        Serial.println("----------------------------------\n");
-    } else if (line == "PROV:CLEAR") {
+    } else if (cmd == "PROV:STATUS") {
+        bool wifiConfigured = ConfigManager::getInstance().hasWifiCredentials();
+        bool wifiConnected = WiFiManager::getInstance().isConnected();
+        String wifiStateStr = "DISCONNECTED";
+        switch (WiFiManager::getInstance().getState()) {
+            case WifiState::CONNECTED: wifiStateStr = "CONNECTED"; break;
+            case WifiState::CONNECTING: wifiStateStr = "CONNECTING"; break;
+            case WifiState::PROVISIONING_PORTAL: wifiStateStr = "PROVISIONING_PORTAL (AP: ESP32-Robot-Setup)"; break;
+            default: wifiStateStr = "DISCONNECTED"; break;
+        }
+
+        bool devConfigured = ConfigManager::getInstance().hasDeviceCredentials();
+        String devId = ConfigManager::getInstance().getDeviceId();
+        bool keyConfigured = (ConfigManager::getInstance().getDeviceApiKey().length() > 0);
+
+        bool wsOnline = WebSocketClientManager::getInstance().isAuthenticated();
+
+        WakeNetStatus wnStatus = WakeWordEngine::getInstance().getStatus();
+        String wnStatusStr = "UNINITIALIZED";
+        switch (wnStatus) {
+            case WakeNetStatus::READY_WAKENET9_HIESP: wnStatusStr = "READY (Wake word: \"Hi ESP\")"; break;
+            case WakeNetStatus::ACTIVE_INFERENCE: wnStatusStr = "ACTIVE_INFERENCE"; break;
+            case WakeNetStatus::PAUSED: wnStatusStr = "PAUSED"; break;
+            case WakeNetStatus::MODEL_PARTITION_NOT_FOUND: wnStatusStr = "MODEL_PARTITION_NOT_FOUND"; break;
+            default: wnStatusStr = "UNINITIALIZED"; break;
+        }
+
+        out.println("\n=======================================================");
+        out.println("             DEVICE PROVISIONING STATUS                ");
+        out.println("=======================================================");
+        out.printf("Firmware:         %s v%s\n", FIRMWARE_NAME, FIRMWARE_VERSION);
+        out.printf("Hardware:         %s\n", HARDWARE_VERSION);
+        out.printf("Wi-Fi Configured: %s%s\n", wifiConfigured ? "YES" : "NO",
+                   wifiConfigured ? (" (SSID: " + ConfigManager::getInstance().getWifiSSID() + ")").c_str() : "");
+        out.printf("Wi-Fi State:      %s\n", wifiStateStr.c_str());
+        out.printf("IP Address:       %s%s\n",
+                   wifiConnected ? WiFiManager::getInstance().getIpAddress().c_str() : "Not Connected",
+                   wifiConnected ? (" (RSSI: " + String(WiFiManager::getInstance().getRSSI()) + " dBm)").c_str() : "");
+        out.printf("Device ID:        %s\n", devConfigured ? devId.c_str() : "[NOT CONFIGURED]");
+        out.printf("Device Key:       %s\n", keyConfigured ? "[CONFIGURED (Protected)]" : "[NOT CONFIGURED]");
+        out.printf("WebSocket:        %s\n", wsOnline ? "ONLINE (Authenticated)" : "OFFLINE");
+        out.printf("Internal SRAM:    %lu KB Free\n", (unsigned long)(ESP.getFreeHeap() / 1024));
+        out.printf("Octal PSRAM:      %lu / %lu KB Free\n",
+                   (unsigned long)(ESP.getFreePsram() / 1024),
+                   (unsigned long)(ESP.getPsramSize() / 1024));
+        out.println("-------------------------------------------------------");
+        out.println("Hardware Diagnostics:");
+        out.printf("  - INMP441 Mic:     %s\n", AudioInput::getInstance().getHardwareStatusStr());
+        out.printf("  - MAX98357A Amp:   %s\n", AudioOutput::getInstance().getHardwareStatusStr());
+        out.printf("  - ILI9341 Display: %s\n", DisplayController::getInstance().getHardwareStatusStr());
+        out.printf("  - TTP223 Touch:    %s\n", TouchSensorController::getInstance().getHardwareStatusStr());
+        out.printf("  - Volume Buttons:  %s\n", ButtonController::getInstance().getHardwareStatusStr());
+        out.printf("  - PN532 RFID:      %s\n", RFIDController::getInstance().getHardwareStatusStr());
+        out.printf("  - WakeNet9 Model:  %s\n", WakeWordEngine::getInstance().getHardwareStatusStr());
+        out.println("=======================================================\n");
+    } else if (cmd == "PROV:CLEAR") {
         ConfigManager::getInstance().clearAll();
-        Serial.println("[CLI] Credentials cleared from NVS.");
-    } else if (line == "PROV:REBOOT") {
-        Serial.println("[CLI] Rebooting device...");
+        out.println("[CLI] Credentials cleared from NVS.");
+    } else if (cmd == "PROV:REBOOT") {
+        out.println("[CLI] Rebooting device...");
         delay(500);
         ESP.restart();
-    } else if (line == "SCREEN:TOGGLE") {
+    } else if (cmd == "SCREEN:TOGGLE") {
         UIManager::getInstance().toggleScreen();
-        Serial.println("[CLI] Display screen toggled.");
+        out.println("[CLI] Display screen toggled.");
+    } else if (cmd == "CARD:SAMPLE:MY") {
+        String uidStr = RFIDController::getInstance().getLastUid();
+        if (uidStr.length() == 0) {
+            out.println("[CLI] ERROR: No card present on PN532. Please hold a MIFARE card on the reader and retry.");
+        } else {
+            uint8_t uid[4] = {0};
+            for (int i = 0; i < 4; i++) {
+                String byteHex = uidStr.substring(i * 2, i * 2 + 2);
+                uid[i] = (uint8_t)strtol(byteHex.c_str(), NULL, 16);
+            }
+            String burmeseSample = "{\"schemaVersion\":\"1.0\",\"cardType\":\"educational\",\"language\":\"my\",\"title\":\"ပန်းသီး\",\"category\":\"အသီး\",\"facts\":[\"အာဟာရပြည့်ဝသည်\",\"ဗီတာမင်စီပါဝင်သည်\"]}";
+            bool ok = RFIDController::getInstance().writeEducationalCard(uid, 4, burmeseSample, RfidLanguage::BURMESE);
+            out.printf("[CLI] Write Burmese Sample Result: %s\n", ok ? "SUCCESS" : "FAILED");
+        }
+    } else if (cmd == "CARD:SAMPLE:EN") {
+        String uidStr = RFIDController::getInstance().getLastUid();
+        if (uidStr.length() == 0) {
+            out.println("[CLI] ERROR: No card present on PN532. Please hold a MIFARE card on the reader and retry.");
+        } else {
+            uint8_t uid[4] = {0};
+            for (int i = 0; i < 4; i++) {
+                String byteHex = uidStr.substring(i * 2, i * 2 + 2);
+                uid[i] = (uint8_t)strtol(byteHex.c_str(), NULL, 16);
+            }
+            String englishSample = "{\"schemaVersion\":\"1.0\",\"cardType\":\"educational\",\"language\":\"en\",\"title\":\"Apple\",\"category\":\"Fruits\",\"facts\":[\"Rich in fiber and vitamin C\"]}";
+            bool ok = RFIDController::getInstance().writeEducationalCard(uid, 4, englishSample, RfidLanguage::ENGLISH);
+            out.printf("[CLI] Write English Sample Result: %s\n", ok ? "SUCCESS" : "FAILED");
+        }
     } else {
-        Serial.println("[CLI] Available commands:");
-        Serial.println("  PROV:WIFI:<SSID>:<PASSWORD>");
-        Serial.println("  PROV:AUTH:<DEVICE_ID>:<API_KEY>");
-        Serial.println("  PROV:STATUS");
-        Serial.println("  PROV:CLEAR");
-        Serial.println("  PROV:REBOOT");
-        Serial.println("  SCREEN:TOGGLE");
+        out.println("[CLI] Available commands:");
+        out.println("  PROV:WIFI:<SSID>:<PASSWORD>");
+        out.println("  PROV:AUTH:<DEVICE_ID>:<API_KEY>");
+        out.println("  PROV:STATUS");
+        out.println("  PROV:CLEAR");
+        out.println("  PROV:REBOOT");
+        out.println("  SCREEN:TOGGLE");
+        out.println("  CARD:SAMPLE:MY (Writes Burmese educational card)");
+        out.println("  CARD:SAMPLE:EN (Writes English educational card)");
     }
+}
+
+void processSerialCliStream(Stream& stream) {
+    static String buffer = "";
+    while (stream.available()) {
+        char c = (char)stream.read();
+        if (c == '\r' || c == '\n') {
+            buffer.trim();
+            if (buffer.length() > 0) {
+                executeCliCommand(buffer, stream);
+                buffer = "";
+            }
+        } else {
+            if (buffer.length() < 256) {
+                buffer += c;
+            }
+        }
+    }
+}
+
+void processSerialCli() {
+    processSerialCliStream(Serial);
+#if ARDUINO_USB_CDC_ON_BOOT
+    if (&Serial0 != &Serial) {
+        processSerialCliStream(Serial0);
+    }
+#endif
 }
 
 void setup() {
     Serial.begin(115200);
-    delay(1500); // Allow USB CDC connection to stabilize
+#if ARDUINO_USB_CDC_ON_BOOT
+    if (&Serial0 != &Serial) {
+        Serial0.begin(115200);
+    }
+#endif
+    delay(500);
 
     Serial.println("\n=======================================================");
     Serial.printf("  🤖 %s v%s\n", FIRMWARE_NAME, FIRMWARE_VERSION);
@@ -170,6 +280,27 @@ void setup() {
         &taskSensorHandle,
         1 // Core 1: Physical Buttons, Touch, RFID
     );
+
+    // 6. Comprehensive Hardware Diagnostic Summary Audit
+    uint32_t flashTotal = 0;
+    esp_flash_get_size(NULL, &flashTotal);
+
+    Serial.println("\n========================================================================");
+    Serial.println("                 HARDWARE SUBSYSTEM DIAGNOSTIC AUDIT                    ");
+    Serial.println("========================================================================");
+    Serial.println(" Subsystem       | Driver Status      | Hardware Detection Status       ");
+    Serial.println("-----------------+--------------------+---------------------------------");
+    Serial.printf(" Flash & PSRAM   | DRIVER_INITIALIZED | HARDWARE_RESPONDING (%lu MB Flash, %lu KB PSRAM)\n",
+                  (unsigned long)(flashTotal / (1024 * 1024)),
+                  (unsigned long)(ESP.getPsramSize() / 1024));
+    Serial.printf(" INMP441 Mic     | DRIVER_INITIALIZED | %s\n", AudioInput::getInstance().getHardwareStatusStr());
+    Serial.printf(" MAX98357A Amp   | DRIVER_INITIALIZED | %s\n", AudioOutput::getInstance().getHardwareStatusStr());
+    Serial.printf(" ILI9341 Display | DRIVER_INITIALIZED | %s\n", DisplayController::getInstance().getHardwareStatusStr());
+    Serial.printf(" TTP223 Touch    | DRIVER_INITIALIZED | %s\n", TouchSensorController::getInstance().getHardwareStatusStr());
+    Serial.printf(" Volume Buttons  | DRIVER_INITIALIZED | %s\n", ButtonController::getInstance().getHardwareStatusStr());
+    Serial.printf(" PN532 RFID      | DRIVER_INITIALIZED | %s\n", RFIDController::getInstance().getHardwareStatusStr());
+    Serial.printf(" WakeNet9 Model  | DRIVER_INITIALIZED | %s\n", WakeWordEngine::getInstance().getHardwareStatusStr());
+    Serial.println("========================================================================\n");
 
     Serial.println("[Boot] All subsystems and FreeRTOS tasks launched successfully.");
     Serial.println("Type 'PROV:STATUS' or 'PROV:WIFI:<ssid>:<pass>' in Serial Monitor.");

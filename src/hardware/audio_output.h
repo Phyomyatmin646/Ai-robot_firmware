@@ -25,6 +25,13 @@ public:
     // Instant mute & DMA clear for barge-in / interruption
     void stopAndFlush();
 
+    const char* getHardwareStatusStr() const {
+        return isInitialized ? "NOT_VERIFIABLE (Simplex I2S TX, no feedback pin)" : "UNINITIALIZED";
+    }
+
+    // Play local cute synthesized head-touch sound effect
+    void playCuteChime();
+
 private:
     AudioOutput() = default;
 
