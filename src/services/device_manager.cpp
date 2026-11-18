@@ -132,12 +132,22 @@ void DeviceManager::checkAndDispatchPendingRfid() {
 void DeviceManager::handleEvent(const AppEvent& event) {
     switch (event.type) {
         case EventType::TOUCH_SENSOR_PRESS:
-            // HEAD-TOUCH INTERACTION ONLY (NO Push-to-Talk)
+            // Head-Touch Interaction on Memo Robot:
             // 1. Play cute local sound effect on ESP32
             AudioOutput::getInstance().playCuteChime();
-            // 2. Transmit head-touch telemetry only to cloud dashboard
+            // 2. Transmit head-touch telemetry to cloud dashboard
             WebSocketClientManager::getInstance().sendTouchEvent(0, true);
-            Serial.println("[DeviceManager] Head-touch detected: Played cute local chime (Zero mic/Gemini activation).");
+
+            // 3. Touch-to-Talk for Memo:
+            // Tapping Memo's head activates listening mode to talk to Memo!
+            // If already listening, tapping head concludes utterance.
+            if (currentState == RobotState::IDLE) {
+                Serial.println("[DeviceManager] Head-touch on Memo detected: Activating Voice Session...");
+                startVoiceSession();
+            } else if (currentState == RobotState::LISTENING) {
+                Serial.println("[DeviceManager] Head-touch detected while listening: Concluding voice session.");
+                endVoiceSession();
+            }
             break;
 
         case EventType::TOUCH_SENSOR_RELEASE:
